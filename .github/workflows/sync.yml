@@ -1,0 +1,44 @@
+name: Daily Catalog Sync
+
+on:
+  schedule:
+    # Every day at 07:00 UTC (~02:00 CT)
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch live JSON APIs
+        run: |
+          set -euo pipefail
+          curl -sSL --fail-with-body "https://sailsandshore.com/api/v1/entities.json" > entities.json.new
+          curl -sSL --fail-with-body "https://sailsandshore.com/api/v1/datapoints.json" > datapoints.json.new
+          curl -sSL --fail-with-body "https://sailsandshore.com/api/v1/questions.json" > questions.json.new
+          curl -sSL --fail-with-body "https://sailsandshore.com/api/v1/sources.json" > sources.json.new
+
+      - name: Validate + move
+        run: |
+          set -euo pipefail
+          for f in entities datapoints questions sources; do
+            jq -e '.' "$f.json.new" > /dev/null
+            mv "$f.json.new" "$f.json"
+          done
+
+      - name: Commit changes (if any)
+        run: |
+          set -euo pipefail
+          git config user.name "sailsandshore-sync-bot"
+          git config user.email "bot@sailsandshore.com"
+          git add entities.json datapoints.json questions.json sources.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "sync: daily catalog refresh from sailsandshore.com"
+          git push
